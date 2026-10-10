@@ -75,7 +75,56 @@ type ignoredJSONValue struct{}
 
 func (*ignoredJSONValue) UnmarshalJSON([]byte) error { return nil }
 
-func decodeEmbeddingResponseMetadata(body io.Reader) (metadata embeddingResponseMetadata, err error) {
+// embeddingTraceVector treats decoding failures as missing trace output. Syntax
+// is validated by the enclosing decoder; vector schema is not a passthrough rule.
+type embeddingTraceVector openai.EmbeddingUnion
+
+func (vector *embeddingTraceVector) UnmarshalJSON(body []byte) error {
+	var decoded openai.EmbeddingUnion
+	if err := decoded.UnmarshalJSON(body); err != nil {
+		vector.Value = nil
+		return nil
+	}
+	*vector = embeddingTraceVector(decoded)
+	return nil
+}
+
+type embeddingTraceEntry struct {
+	openai.Embedding
+	Vector embeddingTraceVector `json:"embedding"`
+}
+
+type embeddingTraceData []openai.Embedding
+
+func (data *embeddingTraceData) UnmarshalJSON(body []byte) error {
+	var decoded []embeddingTraceEntry
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		// Invalid trace-only fields (such as index) must not reject the response.
+		*data = nil
+		return nil
+	}
+	*data = make([]openai.Embedding, len(decoded))
+	for i, entry := range decoded {
+		(*data)[i] = entry.Embedding
+		(*data)[i].Embedding = openai.EmbeddingUnion(entry.Vector)
+	}
+	return nil
+}
+
+// The object label is trace-only metadata, not a passthrough validation rule.
+type embeddingTraceObject string
+
+func (object *embeddingTraceObject) UnmarshalJSON(body []byte) error {
+	var decoded string
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		*object = ""
+		return nil
+	}
+	*object = embeddingTraceObject(decoded)
+	return nil
+}
+
+func decodeEmbeddingResponseMetadata(body io.Reader, traceResponse *openai.EmbeddingResponse) (metadata embeddingResponseMetadata, err error) {
 	decoder := stdjson.NewDecoder(body)
 	start, err := decoder.Token()
 	if err != nil || start == nil {
@@ -97,6 +146,18 @@ func decodeEmbeddingResponseMetadata(body io.Reader) (metadata embeddingResponse
 			err = decoder.Decode(&metadata.Model)
 		case "usage":
 			err = decodeEmbeddingUsage(decoder, &metadata.Usage)
+		case "data":
+			if traceResponse == nil {
+				err = decoder.Decode(&ignoredJSONValue{})
+			} else {
+				err = decoder.Decode((*embeddingTraceData)(&traceResponse.Data))
+			}
+		case "object":
+			if traceResponse == nil {
+				err = decoder.Decode(&ignoredJSONValue{})
+			} else {
+				err = decoder.Decode((*embeddingTraceObject)(&traceResponse.Object))
+			}
 		default:
 			err = decoder.Decode(&ignoredJSONValue{})
 		}
@@ -146,21 +207,19 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseBody(_ map[string]string, 
 	newHeaders []internalapi.Header, newBody []byte, tokenUsage metrics.TokenUsage, responseModel internalapi.ResponseModel, err error,
 ) {
 	var resp openai.EmbeddingResponse
+	var traceResponse *openai.EmbeddingResponse
 	if span != nil {
-		// Recording spans may capture vectors, so preserve the complete tracing response.
-		if err := json.NewDecoder(body).Decode(&resp); err != nil {
-			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
-		}
+		traceResponse = &resp
+	}
+	// Both paths validate syntax and metadata identically. Optional trace fields
+	// are best-effort: sampling must never decide whether a response is forwarded.
+	metadata, err := decodeEmbeddingResponseMetadata(body, traceResponse)
+	if err != nil {
+		return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
+	}
+	resp.Model, resp.Usage = metadata.Model, metadata.Usage
+	if span != nil {
 		span.RecordResponse(&resp)
-	} else {
-		// Passthrough only needs model and usage. The standard decoder validates
-		// JSON while skipping data; Sonic builds a large parser table even for
-		// omitted fields, then EmbeddingUnion decodes the vector a second time.
-		metadata, err := decodeEmbeddingResponseMetadata(body)
-		if err != nil {
-			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
-		}
-		resp.Model, resp.Usage = metadata.Model, metadata.Usage
 	}
 
 	// Embeddings don't return output tokens; populate input and total when provided.

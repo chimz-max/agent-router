@@ -292,3 +292,58 @@ func TestEmbeddingPassthroughCaseSensitiveMetadata(t *testing.T) {
 		})
 	}
 }
+
+// Sampling must not change the response forwarded to a caller or its accounting.
+func TestEmbeddingPassthroughTracingDoesNotChangeValidation(t *testing.T) {
+	for _, body := range []string{
+		`{"data":[{"embedding":{"unexpected":true}}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`,
+		`{"data":[{"embedding":[1,"invalid",3]}],"model":"m"}`,
+		`{"data":"unexpected","model":"m"}`,
+		`{"object":123,"data":[{"embedding":[1,2],"index":"invalid"}],"model":"m"}`,
+		`{"data":[{"embedding":[1e999]}],"model":"m"}`,
+		`{"data":[{"embedding":[1,]}],"model":"m"}`,
+		`{"data":[],"model":123}`,
+		`{"data":[],"usage":{"prompt_tokens":"invalid"}}`,
+		`{"data":[],"model":"m","MODEL":"shadow","usage":{"prompt_tokens":7,"PROMPT_TOKENS":999}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+			span := &mockEmbeddingsSpan{}
+			tracedHeaders, tracedMutation, tracedUsage, tracedModel, tracedErr := translator.ResponseBody(nil, strings.NewReader(body), true, span)
+			if err != nil {
+				require.EqualError(t, tracedErr, err.Error())
+				require.Nil(t, span.recordedResponse)
+			} else {
+				require.NoError(t, tracedErr)
+				require.NotNil(t, span.recordedResponse)
+				require.Equal(t, model, span.recordedResponse.Model)
+			}
+			require.Equal(t, headers, tracedHeaders)
+			require.Equal(t, mutation, tracedMutation)
+			require.Equal(t, usage, tracedUsage)
+			require.Equal(t, model, tracedModel)
+		})
+	}
+}
+
+func TestEmbeddingPassthroughTraceSkipsUndecodableVectors(t *testing.T) {
+	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":1,"embedding":[1,"invalid",3]},{"object":"embedding","index":2,"embedding":"AACAPwAAAEA="}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`
+	span := &mockEmbeddingsSpan{}
+	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+	headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, span)
+	require.NoError(t, err)
+	require.Nil(t, headers)
+	require.Nil(t, mutation)
+	require.Equal(t, tokenUsageFrom(7, -1, -1, -1, 9, -1), usage)
+	require.Equal(t, internalapi.ResponseModel("m"), model)
+	require.Equal(t, "list", span.recordedResponse.Object)
+	require.Len(t, span.recordedResponse.Data, 3)
+	require.Equal(t, []float64{0.1, 0.2}, span.recordedResponse.Data[0].Embedding.Value)
+	require.Nil(t, span.recordedResponse.Data[1].Embedding.Value)
+	require.Equal(t, "AACAPwAAAEA=", span.recordedResponse.Data[2].Embedding.Value)
+	for i, entry := range span.recordedResponse.Data {
+		require.Equal(t, i, entry.Index)
+		require.Equal(t, "embedding", entry.Object)
+	}
+}
