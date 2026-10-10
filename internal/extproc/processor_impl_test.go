@@ -2599,3 +2599,23 @@ func mustCompileCEL(t *testing.T, expr string) cel.Program {
 	require.NoError(t, err)
 	return prog
 }
+
+func TestFormatUserFacingErrorJSON(t *testing.T) {
+	for _, message := range []string{
+		"invalid request",
+		`malformed request: failed to parse JSON: "Syntax error"`,
+		"quoted \"model\"\nnewline\ttab\rreturn\x00nul\\backslash",
+		"Unicode: 日本語",
+		"",
+	} {
+		t.Run(message, func(t *testing.T) {
+			body := formatUserFacingErrorJSON("BadRequest", 400, message)
+			var result userFacingError
+			require.NoError(t, json.Unmarshal(body, &result))
+			require.Equal(t, "error", result.Type)
+			require.Equal(t, "BadRequest", result.Error.Type)
+			require.Equal(t, "400", result.Error.Code)
+			require.Equal(t, message, result.Error.Message)
+		})
+	}
+}
