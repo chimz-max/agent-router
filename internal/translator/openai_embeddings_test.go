@@ -233,6 +233,8 @@ func TestEmbeddingPassthroughRejectsMalformedMetadataAndData(t *testing.T) {
 		`{"data":[{"embedding":[1,2]}],"model":123}`,
 		`{"data":[],"usage":{"prompt_tokens":"invalid"}}`,
 		`{"data":[{"embedding":[1,2]}]`,
+		`[]`,
+		`{"usage":[]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
 			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
@@ -256,6 +258,37 @@ func BenchmarkEmbeddingPassthroughResponse(b *testing.B) {
 					b.Fatalf("unexpected passthrough result: %v", err)
 				}
 			}
+		})
+	}
+}
+
+func TestEmbeddingPassthroughCaseSensitiveMetadata(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"canonical","MODEL":"shadow","usage":{"prompt_tokens":7,"PROMPT_TOKENS":999,"total_tokens":8,"TOTAL_TOKENS":999}}`,
+		`{"MODEL":"shadow","model":"canonical","usage":{"PROMPT_TOKENS":999,"prompt_tokens":7,"TOTAL_TOKENS":999,"total_tokens":8}}`,
+		`{"Model":"shadow","Usage":{"prompt_tokens":999},"usage":{"Prompt_Tokens":999,"Total_Tokens":999}}`,
+		`{"model":"canonical","usage":{"prompt_tokens":7,"total_tokens":8},"USAGE":{"prompt_tokens":999,"total_tokens":999}}`,
+		`{"MODEL":{},"usage":{"PROMPT_TOKENS":[],"prompt_tokens":7,"total_tokens":8},"USAGE":"ignored"}`,
+		`{"mo\u0064el":"canonical","usage":{"prompt_\u0074okens":7,"total_tokens":8}}`,
+		`{"model":"first","model":"last","usage":{"prompt_tokens":7},"usage":{"total_tokens":8}}`,
+		`{"model":"canonical","model":null,"usage":{"prompt_tokens":7,"total_tokens":8},"usage":null}`,
+		`null`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			var original openai.EmbeddingResponse
+			require.NoError(t, json.NewDecoder(strings.NewReader(body)).Decode(&original))
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+			require.NoError(t, err)
+			require.Nil(t, headers)
+			require.Nil(t, mutation)
+			require.Equal(t, original.Model, model)
+			input, hasInput := usage.InputTokens()
+			total, hasTotal := usage.TotalTokens()
+			require.True(t, hasInput)
+			require.True(t, hasTotal)
+			require.EqualValues(t, original.Usage.PromptTokens, input)
+			require.EqualValues(t, original.Usage.TotalTokens, total)
 		})
 	}
 }

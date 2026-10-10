@@ -69,6 +69,75 @@ type embeddingResponseMetadata struct {
 	Usage openai.EmbeddingUsage     `json:"usage"`
 }
 
+// ignoredJSONValue lets the standard decoder validate and skip an unknown
+// field without allocating its contents or materializing embedding vectors.
+type ignoredJSONValue struct{}
+
+func (*ignoredJSONValue) UnmarshalJSON([]byte) error { return nil }
+
+func decodeEmbeddingResponseMetadata(body io.Reader) (metadata embeddingResponseMetadata, err error) {
+	decoder := stdjson.NewDecoder(body)
+	start, err := decoder.Token()
+	if err != nil || start == nil {
+		return metadata, err
+	}
+	if start != stdjson.Delim('{') {
+		return metadata, fmt.Errorf("expected an embeddings response object")
+	}
+	for decoder.More() {
+		var key stdjson.Token
+		key, err = decoder.Token()
+		if err != nil {
+			return metadata, err
+		}
+		// Match the case-sensitive upstream contract; decoding into a struct
+		// would also accept MODEL, USAGE and other case-insensitive aliases.
+		switch key {
+		case "model":
+			err = decoder.Decode(&metadata.Model)
+		case "usage":
+			err = decodeEmbeddingUsage(decoder, &metadata.Usage)
+		default:
+			err = decoder.Decode(&ignoredJSONValue{})
+		}
+		if err != nil {
+			return metadata, err
+		}
+	}
+	_, err = decoder.Token()
+	return metadata, err
+}
+
+func decodeEmbeddingUsage(decoder *stdjson.Decoder, usage *openai.EmbeddingUsage) error {
+	start, err := decoder.Token()
+	if err != nil || start == nil {
+		return err
+	}
+	if start != stdjson.Delim('{') {
+		return fmt.Errorf("expected an embeddings usage object")
+	}
+	for decoder.More() {
+		var key stdjson.Token
+		key, err = decoder.Token()
+		if err != nil {
+			return err
+		}
+		switch key {
+		case "prompt_tokens":
+			err = decoder.Decode(&usage.PromptTokens)
+		case "total_tokens":
+			err = decoder.Decode(&usage.TotalTokens)
+		default:
+			err = decoder.Decode(&ignoredJSONValue{})
+		}
+		if err != nil {
+			return err
+		}
+	}
+	_, err = decoder.Token()
+	return err
+}
+
 // ResponseBody implements [OpenAIEmbeddingTranslator.ResponseBody].
 // OpenAI embeddings support model virtualization through automatic routing and resolution,
 // so we return the actual model from the response body which may differ from the requested model
@@ -87,8 +156,8 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseBody(_ map[string]string, 
 		// Passthrough only needs model and usage. The standard decoder validates
 		// JSON while skipping data; Sonic builds a large parser table even for
 		// omitted fields, then EmbeddingUnion decodes the vector a second time.
-		var metadata embeddingResponseMetadata
-		if err := stdjson.NewDecoder(body).Decode(&metadata); err != nil {
+		metadata, err := decodeEmbeddingResponseMetadata(body)
+		if err != nil {
 			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
 		}
 		resp.Model, resp.Usage = metadata.Model, metadata.Usage
