@@ -236,6 +236,24 @@ extProc:
 Note: Hiding inputs/outputs prevents human or LLM-as-a-Judge evaluation of your
 LLM requests, such as done with the [Phoenix Evals library][phoenix-evals].
 
+## Embedding Vector Capture
+
+For OpenAI and Azure OpenAI embedding passthrough, `extProc.traceEmbeddingVectors` controls whether response vectors are decoded for tracing **when `extProc.validateEmbeddingVectors` is `false`**. Both values default to `true`; the trace option has no effect while validation is enabled.
+
+To keep response model and token metadata in traces without decoding or recording response vectors:
+
+```yaml
+extProc:
+  validateEmbeddingVectors: false
+  traceEmbeddingVectors: false
+```
+
+When validation is disabled but `traceEmbeddingVectors` remains `true`, valid numeric and base64 vectors are captured best-effort. Undecodable vectors are omitted without failing the client request. Disabling capture does not disable tracing or alter the response sent to the client.
+
+This option controls decoding before the recorder runs. The existing OpenInference privacy settings control exported attributes; hiding vector attributes alone does not avoid the translator's vector-decoding memory cost. Input capture continues to follow the existing privacy settings.
+
+See [Embedding Response Validation and Trace Vectors](../gateway-config.md#embedding-response-validation-and-trace-vectors) for defaults, scope, deployment, and memory costs.
+
 ## Session Tracking
 
 Sessions help track and organize related traces across multi-turn conversations

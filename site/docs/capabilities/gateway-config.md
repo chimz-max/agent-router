@@ -153,6 +153,36 @@ The forward proxy applies to all AI Gateway upstream (LLM) clusters for Gateways
 :::warning
 Proxy authentication (for example, `Proxy-Authorization`) and a TLS connection to the proxy itself are not currently supported. The proxy is expected to be reachable over plaintext HTTP and to authorize the gateway by network policy (for example, an IP allowlist).
 :::
+## Embedding Response Validation and Trace Vectors
+
+The AI Gateway Helm chart exposes two controller-wide options for OpenAI and Azure OpenAI embedding responses. These are chart values under `extProc`, not fields in the `GatewayConfig` CRD. Providers that require response-format translation retain their existing decoding.
+
+| Helm value                         | Default | Behavior                                                                                                                                                                                                                  |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extProc.validateEmbeddingVectors` | `true`  | Preserve upstream full-response schema validation, including decoding vectors. Applies whether or not a trace is recorded.                                                                                                |
+| `extProc.traceEmbeddingVectors`    | `true`  | When validation is `false`, capture valid vectors in recording spans on a best-effort basis. Set to `false` to skip vector decoding for tracing and retain model/token metadata. Has no effect when validation is `true`. |
+
+To use lower-memory passthrough, including when tracing is enabled, configure the Helm values:
+
+```yaml
+extProc:
+  validateEmbeddingVectors: false
+  traceEmbeddingVectors: false
+```
+
+With validation disabled, the gateway still validates JSON syntax and model/usage metadata with case-sensitive field matching. It forwards the original response body unchanged and does not enforce vector types. If trace vector capture remains enabled, undecodable vectors are omitted from the trace without failing the request; invalid trace-only fields may cause trace data to be omitted. Changing trace sampling never changes the selected validation policy.
+
+:::warning Memory cost
+
+Validation defaults to `true` to preserve upstream behavior. It fully decodes embedding vectors and has substantially higher memory use. In a local 100 MiB response benchmark, decoding allocated approximately **2.66 GiB with validation enabled**, versus **256 MiB with it disabled and no vector capture**. The latter allocation level also held with a recording span when both options were `false`.
+
+These are cumulative allocations per operation, not peak resident memory or recommended container limits. The protocol still buffers response bodies. Capturing vectors in traces also materializes them and can increase memory use even when validation is disabled. Size resources for the payload sizes and concurrency you expect.
+
+:::
+
+The chart passes these settings to controller flags `--extProcValidateEmbeddingVectors` and `--extProcTraceEmbeddingVectors`. The controller passes `-validateEmbeddingVectors=false` or `-traceEmbeddingVectors=false` to the extproc sidecar only when a setting is turned off; both extproc defaults are also `true`, so gateways that keep the defaults see no change in their sidecar arguments. Turning a setting off changes the extproc config hash, so the controller rolls gateway pods once it restarts with the new flags.
+
+See [Tracing](./observability/tracing.md#embedding-vector-capture) for how vector capture interacts with tracing configuration.
 
 ## Environment Variable Precedence
 
