@@ -6,6 +6,7 @@
 package translator
 
 import (
+	stdjson "encoding/json" //nolint:depguard // Sparse decoding must skip vectors without Sonic's per-element parser tables.
 	"fmt"
 	"io"
 	"path"
@@ -63,6 +64,11 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseHeaders(map[string]string)
 	return nil, nil
 }
 
+type embeddingResponseMetadata struct {
+	Model internalapi.ResponseModel `json:"model"`
+	Usage openai.EmbeddingUsage     `json:"usage"`
+}
+
 // ResponseBody implements [OpenAIEmbeddingTranslator.ResponseBody].
 // OpenAI embeddings support model virtualization through automatic routing and resolution,
 // so we return the actual model from the response body which may differ from the requested model
@@ -71,13 +77,21 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseBody(_ map[string]string, 
 	newHeaders []internalapi.Header, newBody []byte, tokenUsage metrics.TokenUsage, responseModel internalapi.ResponseModel, err error,
 ) {
 	var resp openai.EmbeddingResponse
-	if err := json.NewDecoder(body).Decode(&resp); err != nil {
-		return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
-	}
-
-	// Record the response in the span if successful.
 	if span != nil {
+		// Recording spans may capture vectors, so preserve the complete tracing response.
+		if err := json.NewDecoder(body).Decode(&resp); err != nil {
+			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
+		}
 		span.RecordResponse(&resp)
+	} else {
+		// Passthrough only needs model and usage. The standard decoder validates
+		// JSON while skipping data; Sonic builds a large parser table even for
+		// omitted fields, then EmbeddingUnion decodes the vector a second time.
+		var metadata embeddingResponseMetadata
+		if err := stdjson.NewDecoder(body).Decode(&metadata); err != nil {
+			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
+		}
+		resp.Model, resp.Usage = metadata.Model, metadata.Usage
 	}
 
 	// Embeddings don't return output tokens; populate input and total when provided.

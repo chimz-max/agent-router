@@ -6,6 +6,7 @@
 package translator
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -197,4 +198,64 @@ func TestOpenAIToOpenAITranslatorV1EmbeddingResponseError(t *testing.T) {
 		require.Nil(t, headerMutation)
 		require.Nil(t, bodyMutation)
 	})
+}
+
+func TestEmbeddingPassthroughMetadata(t *testing.T) {
+	for _, vector := range []string{`[0.1,0.2,0.3]`, `"AACAPwAAAEA="`} {
+		t.Run(vector, func(t *testing.T) {
+			body := `{"data":[{"object":"embedding","index":0,"embedding":` + vector + `}],"model":"provider-model","usage":{"prompt_tokens":7,"total_tokens":9}}`
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+			require.NoError(t, err)
+			require.Nil(t, headers)
+			require.Nil(t, mutation)
+			require.Equal(t, internalapi.ResponseModel("provider-model"), model)
+			require.Equal(t, tokenUsageFrom(7, -1, -1, -1, 9, -1), usage)
+
+			span := &mockEmbeddingsSpan{}
+			_, mutation, tracedUsage, tracedModel, err := translator.ResponseBody(nil, strings.NewReader(body), true, span)
+			require.NoError(t, err)
+			require.Nil(t, mutation)
+			require.Equal(t, usage, tracedUsage)
+			require.Equal(t, model, tracedModel)
+			require.NotNil(t, span.recordedResponse)
+			require.Len(t, span.recordedResponse.Data, 1)
+			encoded, err := json.Marshal(span.recordedResponse.Data[0].Embedding)
+			require.NoError(t, err)
+			require.JSONEq(t, vector, string(encoded))
+		})
+	}
+}
+
+func TestEmbeddingPassthroughRejectsMalformedMetadataAndData(t *testing.T) {
+	for _, body := range []string{
+		`{"data":[{"embedding":[1,]}],"model":"m"}`,
+		`{"data":[{"embedding":[1,2]}],"model":123}`,
+		`{"data":[],"usage":{"prompt_tokens":"invalid"}}`,
+		`{"data":[{"embedding":[1,2]}]`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+			_, _, _, _, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+			require.Error(t, err)
+		})
+	}
+}
+
+func BenchmarkEmbeddingPassthroughResponse(b *testing.B) {
+	for _, size := range []int{1 << 20, 100 << 20} {
+		b.Run(fmt.Sprintf("%dMiB", size>>20), func(b *testing.B) {
+			body := `{"data":[{"embedding":[` + strings.Repeat("0.1234567890,", size/13) + `0]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":7}}`
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "")
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				_, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+				if err != nil || mutation != nil || model != "m" || usage != tokenUsageFrom(7, -1, -1, -1, 7, -1) {
+					b.Fatalf("unexpected passthrough result: %v", err)
+				}
+			}
+		})
+	}
 }
