@@ -49,6 +49,7 @@ const defaultInsecureMCPSessionEncryptionSeed = "default-insecure-seed"
 // extProcFlags is the struct that holds the flags passed to the external processor.
 type extProcFlags struct {
 	configBundlePath                       string        // path to the sharded configuration bundle directory.
+	validateEmbeddingVectors               bool          // validate OpenAI-compatible embedding response vectors.
 	extProcAddr                            string        // gRPC address for the external processor.
 	logLevel                               slog.Level    // log level for the external processor.
 	logFormat                              string        // log output format for the external processor, "text" or "json".
@@ -117,6 +118,8 @@ func parseAndValidateFlags(args []string) (extProcFlags, error) {
 		internalapi.LogFormatText,
 		"log output format for the external processor. One of 'text' or 'json'.",
 	)
+	fs.BoolVar(&flags.validateEmbeddingVectors, "validateEmbeddingVectors", true,
+		"Validate OpenAI-compatible embedding response vectors. Full decoding increases memory use; disabling validates only JSON syntax and model/usage metadata.")
 	fs.BoolVar(&flags.enableRedaction, "enableRedaction", false,
 		"Enable redaction of sensitive information in debug logs.")
 	fs.IntVar(&flags.adminPort, "adminPort", 1064, "HTTP port for the admin server (serves /metrics and /health endpoints).")
@@ -330,7 +333,7 @@ func Main(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	server.Register(path.Join(flags.rootPrefix, endpointPrefixes.OpenAI, "/v1/completions"), extproc.NewFactory(
 		completionMetricsFactory, tracing.CompletionTracer(), endpointspec.CompletionsEndpointSpec{}))
 	server.Register(path.Join(flags.rootPrefix, endpointPrefixes.OpenAI, "/v1/embeddings"), extproc.NewFactory(
-		embeddingsMetricsFactory, tracing.EmbeddingsTracer(), endpointspec.EmbeddingsEndpointSpec{}))
+		embeddingsMetricsFactory, tracing.EmbeddingsTracer(), endpointspec.EmbeddingsEndpointSpec{ValidateEmbeddingVectors: &flags.validateEmbeddingVectors}))
 	server.Register(path.Join(flags.rootPrefix, endpointPrefixes.OpenAI, "/v1/responses"), extproc.NewFactory(
 		responsesMetricsFactory, tracing.ResponsesTracer(), endpointspec.ResponsesEndpointSpec{}))
 	server.Register(path.Join(flags.rootPrefix, endpointPrefixes.OpenAI, "/v1/responses/input_tokens"), extproc.NewFactory(

@@ -448,3 +448,27 @@ func TestInsecureSeedWarner(t *testing.T) {
 		})
 	}
 }
+
+func TestEmbeddingVectorValidationFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		want      bool
+		wantError bool
+	}{
+		{name: "default", want: true},
+		{name: "enabled", args: []string{"-validateEmbeddingVectors=true"}, want: true},
+		{name: "disabled", args: []string{"-validateEmbeddingVectors=false"}},
+		{name: "invalid", args: []string{"-validateEmbeddingVectors=invalid"}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flags, err := parseAndValidateFlags(append([]string{"-configBundlePath", "/tmp/config-bundle"}, tc.args...))
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, flags.validateEmbeddingVectors)
+		})
+	}
+}

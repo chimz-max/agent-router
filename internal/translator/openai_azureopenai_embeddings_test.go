@@ -48,7 +48,7 @@ func TestOpenAIToAzureOpenAITranslatorV1EmbeddingRequestBody(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", tc.modelNameOverride)
+			translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", tc.modelNameOverride, true)
 			originalBody := `{"model":"text-embedding-ada-002","input":"test input"}`
 			var req openai.EmbeddingRequest
 			require.NoError(t, json.Unmarshal([]byte(originalBody), &req))
@@ -80,7 +80,7 @@ func TestOpenAIToAzureOpenAITranslatorV1EmbeddingRequestBody(t *testing.T) {
 }
 
 func TestOpenAIToAzureOpenAITranslatorV1EmbeddingResponseHeaders(t *testing.T) {
-	translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "")
+	translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "", true)
 	headerMutation, err := translator.ResponseHeaders(map[string]string{})
 	require.NoError(t, err)
 	require.Nil(t, headerMutation)
@@ -127,7 +127,7 @@ func TestOpenAIToAzureOpenAITranslatorV1EmbeddingResponseBody(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "")
+			translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "", true)
 			respHeaders := map[string]string{
 				"content-type": "application/json",
 			}
@@ -160,7 +160,7 @@ func TestOpenAIToAzureOpenAITranslatorV1EmbeddingResponseBody(t *testing.T) {
 }
 
 func TestOpenAIToAzureOpenAITranslatorV1EmbeddingResponseError(t *testing.T) {
-	translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "").(*openAIToAzureOpenAITranslatorV1Embedding)
+	translator := NewEmbeddingOpenAIToAzureOpenAITranslator("2024-12-01-preview", "", true).(*openAIToAzureOpenAITranslatorV1Embedding)
 
 	t.Run("non_json_error", func(t *testing.T) {
 		respHeaders := map[string]string{

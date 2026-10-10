@@ -22,15 +22,16 @@ import (
 )
 
 // NewEmbeddingOpenAIToOpenAITranslator implements [Factory] for OpenAI to OpenAI translation for embeddings.
-func NewEmbeddingOpenAIToOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride) OpenAIEmbeddingTranslator {
-	return &openAIToOpenAITranslatorV1Embedding{modelNameOverride: modelNameOverride, path: path.Join("/", apiVersion, "embeddings")}
+func NewEmbeddingOpenAIToOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride, validateEmbeddingVectors bool) OpenAIEmbeddingTranslator {
+	return &openAIToOpenAITranslatorV1Embedding{modelNameOverride: modelNameOverride, validateEmbeddingVectors: validateEmbeddingVectors, path: path.Join("/", apiVersion, "embeddings")}
 }
 
 // openAIToOpenAITranslatorV1Embedding is a passthrough translator for OpenAI Embeddings API.
 // May apply model overrides but otherwise preserves the OpenAI format:
 // https://platform.openai.com/docs/api-reference/embeddings/create
 type openAIToOpenAITranslatorV1Embedding struct {
-	modelNameOverride internalapi.ModelNameOverride
+	modelNameOverride        internalapi.ModelNameOverride
+	validateEmbeddingVectors bool
 	// The path of the embeddings endpoint to be used for the request. It is prefixed with the OpenAI path prefix.
 	path string
 }
@@ -207,17 +208,24 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseBody(_ map[string]string, 
 	newHeaders []internalapi.Header, newBody []byte, tokenUsage metrics.TokenUsage, responseModel internalapi.ResponseModel, err error,
 ) {
 	var resp openai.EmbeddingResponse
-	var traceResponse *openai.EmbeddingResponse
-	if span != nil {
-		traceResponse = &resp
+	if o.validateEmbeddingVectors {
+		// Preserve upstream schema validation. Full decoding materializes vectors
+		// and has substantially higher memory cost than metadata-only passthrough.
+		if err := json.NewDecoder(body).Decode(&resp); err != nil {
+			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
+		}
+	} else {
+		var traceResponse *openai.EmbeddingResponse
+		if span != nil {
+			traceResponse = &resp
+		}
+		// Sampling must not change validation. Trace vector capture is best-effort.
+		metadata, err := decodeEmbeddingResponseMetadata(body, traceResponse)
+		if err != nil {
+			return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
+		}
+		resp.Model, resp.Usage = metadata.Model, metadata.Usage
 	}
-	// Both paths validate syntax and metadata identically. Optional trace fields
-	// are best-effort: sampling must never decide whether a response is forwarded.
-	metadata, err := decodeEmbeddingResponseMetadata(body, traceResponse)
-	if err != nil {
-		return nil, nil, tokenUsage, "", fmt.Errorf("failed to unmarshal body: %w", err)
-	}
-	resp.Model, resp.Usage = metadata.Model, metadata.Usage
 	if span != nil {
 		span.RecordResponse(&resp)
 	}

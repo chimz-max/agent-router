@@ -52,6 +52,13 @@ extProc:
   logFormat: text
   # Enable redaction of sensitive information in debug logs (only takes effect when logLevel is "debug").
   enableRedaction: false
+  # -- Validate vectors in OpenAI/Azure OpenAI embedding responses (upstream behavior).
+  # Full decoding has substantially higher memory use: a 100 MiB response benchmark
+  # allocated about 2.66 GiB with validation, versus 256 MiB without it (not peak RSS).
+  # Set false for metadata-only passthrough: JSON syntax and model/usage are still
+  # validated; trace vectors are best-effort. Tracing valid vectors still costs memory.
+  # Maps to controller --extProcValidateEmbeddingVectors and sidecar -validateEmbeddingVectors.
+  validateEmbeddingVectors: true
 
   ## @param extProc.extraEnvVars Array with extra environment variables to add to extProc containers
   ## e.g:

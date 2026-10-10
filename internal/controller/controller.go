@@ -70,6 +70,8 @@ type Options struct {
 	ExtProcLogFormat string
 	// ExtProcEnableRedaction enables redaction of sensitive information in debug logs for the external processor.
 	ExtProcEnableRedaction bool
+	// ExtProcValidateEmbeddingVectors enables full OpenAI-compatible embedding response validation.
+	ExtProcValidateEmbeddingVectors bool
 	// ExtProcImage is the image for the external processor set on Deployment.
 	ExtProcImage string
 	// ExtProcImagePullPolicy is the image pull policy for the external processor set on Deployment.

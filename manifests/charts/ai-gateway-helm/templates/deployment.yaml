@@ -67,6 +67,7 @@ spec:
             - --extProcImagePullPolicy={{ .Values.extProc.imagePullPolicy }}
             - --extProcLogLevel={{ .Values.extProc.logLevel }}
             - --extProcLogFormat={{ .Values.extProc.logFormat }}
+            - --extProcValidateEmbeddingVectors={{ .Values.extProc.validateEmbeddingVectors }}
             - --envoyGatewayNamespace={{ .Values.envoyGateway.namespace }}
             {{- if .Values.extProc.enableRedaction }}
             - --extProcEnableRedaction=true

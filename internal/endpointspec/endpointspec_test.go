@@ -1913,3 +1913,29 @@ func TestMessagesCountTokensEndpointSpec_GetTranslator(t *testing.T) {
 	_, err := spec.GetTranslator(filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI}, "override")
 	require.ErrorContains(t, err, "unsupported")
 }
+
+func TestEmbeddingsEndpointSpec_VectorValidation(t *testing.T) {
+	for _, schema := range []filterapi.APISchemaName{filterapi.APISchemaOpenAI, filterapi.APISchemaAzureOpenAI} {
+		for _, tc := range []struct {
+			name      string
+			validate  *bool
+			wantError bool
+		}{
+			{"default", nil, true},
+			{"enabled", ptr.To(true), true},
+			{"disabled", ptr.To(false), false},
+		} {
+			t.Run(string(schema)+"/"+tc.name, func(t *testing.T) {
+				spec := EmbeddingsEndpointSpec{ValidateEmbeddingVectors: tc.validate}
+				tr, err := spec.GetTranslator(filterapi.VersionedAPISchema{Name: schema}, "")
+				require.NoError(t, err)
+				_, _, _, _, err = tr.ResponseBody(nil, bytes.NewBufferString(`{"data":[{"embedding":{"invalid":true}}],"model":"m"}`), true, nil)
+				if tc.wantError {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			})
+		}
+	}
+}

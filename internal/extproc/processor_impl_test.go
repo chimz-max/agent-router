@@ -2619,3 +2619,22 @@ func TestFormatUserFacingErrorJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestNewFactoryPreservesEmbeddingValidationOption(t *testing.T) {
+	for _, validate := range []bool{true, false} {
+		t.Run(fmt.Sprint(validate), func(t *testing.T) {
+			factory := NewFactory(nil, tracingapi.NoopEmbeddingsTracer{}, endpointspec.EmbeddingsEndpointSpec{ValidateEmbeddingVectors: &validate})
+			processor, err := factory(&filterapi.RuntimeConfig{}, nil, slog.Default(), false, false)
+			require.NoError(t, err)
+			router := processor.(*routerProcessor[openai.EmbeddingRequest, openai.EmbeddingResponse, struct{}, endpointspec.EmbeddingsEndpointSpec])
+			tr, err := router.eh.GetTranslator(filterapi.VersionedAPISchema{Name: filterapi.APISchemaOpenAI}, "")
+			require.NoError(t, err)
+			_, _, _, _, err = tr.ResponseBody(nil, bytes.NewBufferString(`{"data":[{"embedding":{"invalid":true}}],"model":"m"}`), true, nil)
+			if validate {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
