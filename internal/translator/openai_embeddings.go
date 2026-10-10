@@ -22,8 +22,8 @@ import (
 )
 
 // NewEmbeddingOpenAIToOpenAITranslator implements [Factory] for OpenAI to OpenAI translation for embeddings.
-func NewEmbeddingOpenAIToOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride, validateEmbeddingVectors bool) OpenAIEmbeddingTranslator {
-	return &openAIToOpenAITranslatorV1Embedding{modelNameOverride: modelNameOverride, validateEmbeddingVectors: validateEmbeddingVectors, path: path.Join("/", apiVersion, "embeddings")}
+func NewEmbeddingOpenAIToOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride, validateEmbeddingVectors, traceEmbeddingVectors bool) OpenAIEmbeddingTranslator {
+	return &openAIToOpenAITranslatorV1Embedding{modelNameOverride: modelNameOverride, validateEmbeddingVectors: validateEmbeddingVectors, traceEmbeddingVectors: traceEmbeddingVectors, path: path.Join("/", apiVersion, "embeddings")}
 }
 
 // openAIToOpenAITranslatorV1Embedding is a passthrough translator for OpenAI Embeddings API.
@@ -32,6 +32,7 @@ func NewEmbeddingOpenAIToOpenAITranslator(apiVersion string, modelNameOverride i
 type openAIToOpenAITranslatorV1Embedding struct {
 	modelNameOverride        internalapi.ModelNameOverride
 	validateEmbeddingVectors bool
+	traceEmbeddingVectors    bool
 	// The path of the embeddings endpoint to be used for the request. It is prefixed with the OpenAI path prefix.
 	path string
 }
@@ -216,7 +217,7 @@ func (o *openAIToOpenAITranslatorV1Embedding) ResponseBody(_ map[string]string, 
 		}
 	} else {
 		var traceResponse *openai.EmbeddingResponse
-		if span != nil {
+		if span != nil && o.traceEmbeddingVectors {
 			traceResponse = &resp
 		}
 		// Sampling must not change validation. Trace vector capture is best-effort.

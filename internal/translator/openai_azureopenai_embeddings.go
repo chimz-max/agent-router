@@ -17,12 +17,13 @@ import (
 
 // NewEmbeddingOpenAIToAzureOpenAITranslator implements [Factory] for OpenAI to Azure OpenAI translation
 // for embeddings.
-func NewEmbeddingOpenAIToAzureOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride, validateEmbeddingVectors bool) OpenAIEmbeddingTranslator {
+func NewEmbeddingOpenAIToAzureOpenAITranslator(apiVersion string, modelNameOverride internalapi.ModelNameOverride, validateEmbeddingVectors, traceEmbeddingVectors bool) OpenAIEmbeddingTranslator {
 	return &openAIToAzureOpenAITranslatorV1Embedding{
 		apiVersion: apiVersion,
 		openAIToOpenAITranslatorV1Embedding: openAIToOpenAITranslatorV1Embedding{
 			modelNameOverride:        modelNameOverride,
 			validateEmbeddingVectors: validateEmbeddingVectors,
+			traceEmbeddingVectors:    traceEmbeddingVectors,
 		},
 	}
 }

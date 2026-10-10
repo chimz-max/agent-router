@@ -415,6 +415,8 @@ helm-test: helm-package  ## Test the helm chart with a dummy version.
 
 	@$(GO_TOOL) helm template ${HELM_CHART_PATH} | grep -q -- 'extProcValidateEmbeddingVectors=true'
 	@$(GO_TOOL) helm template ${HELM_CHART_PATH} --set extProc.validateEmbeddingVectors=false | grep -q -- 'extProcValidateEmbeddingVectors=false'
+	@$(GO_TOOL) helm template ${HELM_CHART_PATH} | grep -q -- 'extProcTraceEmbeddingVectors=true'
+	@$(GO_TOOL) helm template ${HELM_CHART_PATH} --set extProc.validateEmbeddingVectors=false --set extProc.traceEmbeddingVectors=false | grep -q -- 'extProcTraceEmbeddingVectors=false'
 
 # This pushes the helm chart to the OCI registry, requiring the access to the registry endpoint.
 .PHONY: helm-push

@@ -46,6 +46,7 @@ type flags struct {
 	logFormat                       string
 	extProcEnableRedaction          bool
 	extProcValidateEmbeddingVectors bool
+	extProcTraceEmbeddingVectors    bool
 	extProcImage                    string
 	extProcImagePullPolicy          corev1.PullPolicy
 	enableLeaderElection            bool
@@ -158,6 +159,8 @@ func parseAndValidateFlags(args []string) (*flags, error) {
 		internalapi.LogFormatText,
 		"The log output format for the external processor. One of 'text' or 'json'.",
 	)
+	extProcTraceEmbeddingVectorsPtr := fs.Bool("extProcTraceEmbeddingVectors", true,
+		"Capture embedding vectors in traces when vector validation is disabled. Disabling reduces tracing memory use.")
 	extProcValidateEmbeddingVectorsPtr := fs.Bool("extProcValidateEmbeddingVectors", true,
 		"Validate OpenAI-compatible embedding response vectors in extproc. Full decoding increases memory use.")
 	extProcEnableRedactionPtr := fs.Bool(
@@ -406,6 +409,7 @@ func parseAndValidateFlags(args []string) (*flags, error) {
 		logFormat:                              *logFormatPtr,
 		extProcEnableRedaction:                 *extProcEnableRedactionPtr,
 		extProcValidateEmbeddingVectors:        *extProcValidateEmbeddingVectorsPtr,
+		extProcTraceEmbeddingVectors:           *extProcTraceEmbeddingVectorsPtr,
 		extProcImage:                           *extProcImagePtr,
 		extProcImagePullPolicy:                 extProcPullPolicy,
 		enableLeaderElection:                   *enableLeaderElectionPtr,
@@ -540,6 +544,7 @@ func main() {
 		ExtProcLogFormat:                       parsedFlags.extProcLogFormat,
 		ExtProcEnableRedaction:                 parsedFlags.extProcEnableRedaction,
 		ExtProcValidateEmbeddingVectors:        parsedFlags.extProcValidateEmbeddingVectors,
+		ExtProcTraceEmbeddingVectors:           parsedFlags.extProcTraceEmbeddingVectors,
 		EnableLeaderElection:                   parsedFlags.enableLeaderElection,
 		UDSPath:                                extProcUDSPath,
 		RequestHeaderAttributes:                parsedFlags.requestHeaderAttributes,

@@ -98,6 +98,7 @@ The Helm chart for Envoy AI Gateway
 | extProc.imagePullPolicy | string | `"IfNotPresent"` |  |
 | extProc.imagePullSecrets | list | `[]` |  |
 | extProc.logLevel | string | `"info"` |  |
+| extProc.traceEmbeddingVectors | bool | `true` | Capture valid embedding vectors in traces when validateEmbeddingVectors is false. Set false to record only model and token usage and avoid vector decoding for tracing. This option has no effect when validation is true; full decoding and existing tracing remain. Maps to controller --extProcTraceEmbeddingVectors and sidecar -traceEmbeddingVectors. |
 | extProc.validateEmbeddingVectors | bool | `true` | Validate vectors in OpenAI/Azure OpenAI embedding responses (upstream behavior). Full decoding has substantially higher memory use: a 100 MiB response benchmark allocated about 2.66 GiB with validation, versus 256 MiB without it (not peak RSS). Set false for metadata-only passthrough: JSON syntax and model/usage are still validated; trace vectors are best-effort. Tracing valid vectors still costs memory. Maps to controller --extProcValidateEmbeddingVectors and sidecar -validateEmbeddingVectors. |
 | global.imagePullSecrets | list | `[]` | references to pre-created imagePullSecrets in the target namespace Precedence: component-specific values win. If `controller.imagePullSecrets` or `extProc.imagePullSecrets` are set (non-empty), those are used; otherwise this `global.imagePullSecrets` value is used as a fallback (values are not merged). Example: imagePullSecrets:   - name: regcred |
 

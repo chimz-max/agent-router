@@ -52,7 +52,7 @@ func TestOpenAIToOpenAITranslatorV1EmbeddingRequestBody(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", tc.modelNameOverride, true)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", tc.modelNameOverride, true, true)
 			originalBody := `{"model":"text-embedding-ada-002","input":"test input"}`
 			var req openai.EmbeddingRequest
 			require.NoError(t, json.Unmarshal([]byte(originalBody), &req))
@@ -84,7 +84,7 @@ func TestOpenAIToOpenAITranslatorV1EmbeddingRequestBody(t *testing.T) {
 }
 
 func TestOpenAIToOpenAITranslatorV1EmbeddingResponseHeaders(t *testing.T) {
-	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true)
+	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true, true)
 	headerMutation, err := translator.ResponseHeaders(map[string]string{})
 	require.NoError(t, err)
 	require.Nil(t, headerMutation)
@@ -131,7 +131,7 @@ func TestOpenAIToOpenAITranslatorV1EmbeddingResponseBody(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true, true)
 			respHeaders := map[string]string{
 				"content-type": "application/json",
 			}
@@ -164,7 +164,7 @@ func TestOpenAIToOpenAITranslatorV1EmbeddingResponseBody(t *testing.T) {
 }
 
 func TestOpenAIToOpenAITranslatorV1EmbeddingResponseError(t *testing.T) {
-	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true).(*openAIToOpenAITranslatorV1Embedding)
+	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", true, true).(*openAIToOpenAITranslatorV1Embedding)
 
 	t.Run("non_json_error", func(t *testing.T) {
 		respHeaders := map[string]string{
@@ -205,7 +205,7 @@ func TestEmbeddingPassthroughMetadata(t *testing.T) {
 	for _, vector := range []string{`[0.1,0.2,0.3]`, `"AACAPwAAAEA="`} {
 		t.Run(vector, func(t *testing.T) {
 			body := `{"data":[{"object":"embedding","index":0,"embedding":` + vector + `}],"model":"provider-model","usage":{"prompt_tokens":7,"total_tokens":9}}`
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false, true)
 			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
 			require.NoError(t, err)
 			require.Nil(t, headers)
@@ -238,7 +238,7 @@ func TestEmbeddingPassthroughRejectsMalformedMetadataAndData(t *testing.T) {
 		`{"usage":[]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false, true)
 			_, _, _, _, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
 			require.Error(t, err)
 		})
@@ -246,16 +246,22 @@ func TestEmbeddingPassthroughRejectsMalformedMetadataAndData(t *testing.T) {
 }
 
 func BenchmarkEmbeddingPassthroughResponse(b *testing.B) {
-	for _, validate := range []bool{true, false} {
+	for _, mode := range []struct{ validate, recording, capture bool }{
+		{true, false, true}, {false, false, true}, {false, true, false},
+	} {
 		for _, size := range []int{1 << 20, 100 << 20} {
-			b.Run(fmt.Sprintf("validate=%t/%dMiB", validate, size>>20), func(b *testing.B) {
+			b.Run(fmt.Sprintf("validate=%t/recording=%t/capture=%t/%dMiB", mode.validate, mode.recording, mode.capture, size>>20), func(b *testing.B) {
 				body := `{"data":[{"embedding":[` + strings.Repeat("0.1234567890,", size/13) + `0]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":7}}`
-				translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", validate)
+				translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", mode.validate, mode.capture)
+				var span tracingapi.EmbeddingsSpan
+				if mode.recording {
+					span = &mockEmbeddingsSpan{}
+				}
 				b.SetBytes(int64(len(body)))
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
-					_, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
+					_, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, span)
 					if err != nil || mutation != nil || model != "m" || usage != tokenUsageFrom(7, -1, -1, -1, 7, -1) {
 						b.Fatalf("unexpected passthrough result: %v", err)
 					}
@@ -280,7 +286,7 @@ func TestEmbeddingPassthroughCaseSensitiveMetadata(t *testing.T) {
 		t.Run(body, func(t *testing.T) {
 			var original openai.EmbeddingResponse
 			require.NoError(t, json.NewDecoder(strings.NewReader(body)).Decode(&original))
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false, true)
 			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
 			require.NoError(t, err)
 			require.Nil(t, headers)
@@ -310,7 +316,7 @@ func TestEmbeddingPassthroughTracingDoesNotChangeValidation(t *testing.T) {
 		`{"data":[],"model":"m","MODEL":"shadow","usage":{"prompt_tokens":7,"PROMPT_TOKENS":999}}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false)
+			translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false, true)
 			headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, nil)
 			span := &mockEmbeddingsSpan{}
 			tracedHeaders, tracedMutation, tracedUsage, tracedModel, tracedErr := translator.ResponseBody(nil, strings.NewReader(body), true, span)
@@ -333,7 +339,7 @@ func TestEmbeddingPassthroughTracingDoesNotChangeValidation(t *testing.T) {
 func TestEmbeddingPassthroughTraceSkipsUndecodableVectors(t *testing.T) {
 	body := `{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2]},{"object":"embedding","index":1,"embedding":[1,"invalid",3]},{"object":"embedding","index":2,"embedding":"AACAPwAAAEA="}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`
 	span := &mockEmbeddingsSpan{}
-	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false)
+	translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", false, true)
 	headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(body), true, span)
 	require.NoError(t, err)
 	require.Nil(t, headers)
@@ -353,39 +359,49 @@ func TestEmbeddingPassthroughTraceSkipsUndecodableVectors(t *testing.T) {
 
 func TestEmbeddingVectorValidationWithAndWithoutTracing(t *testing.T) {
 	for _, validate := range []bool{true, false} {
-		for _, traced := range []bool{true, false} {
-			for _, tc := range []struct {
-				name, body                   string
-				alwaysInvalid, invalidVector bool
-			}{
-				{"numeric", `{"data":[{"embedding":[1,2]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, false},
-				{"base64", `{"data":[{"embedding":"AACAPwAAAEA="}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, false},
-				{"invalid_vector", `{"data":[{"embedding":[1,"invalid",3]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, true},
-				{"invalid_json", `{"data":[{"embedding":[1,]}]}`, true, false},
-				{"invalid_metadata", `{"data":[],"model":123}`, true, false},
-			} {
-				t.Run(fmt.Sprintf("validate=%t/traced=%t/%s", validate, traced, tc.name), func(t *testing.T) {
-					translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", validate)
-					var span tracingapi.EmbeddingsSpan
-					recorder := &mockEmbeddingsSpan{}
-					if traced {
-						span = recorder
-					}
-					headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(tc.body), true, span)
-					if tc.alwaysInvalid || (validate && tc.invalidVector) {
-						require.Error(t, err)
-						require.Nil(t, recorder.recordedResponse)
-						return
-					}
-					require.NoError(t, err)
-					require.Nil(t, headers)
-					require.Nil(t, mutation)
-					require.Equal(t, internalapi.ResponseModel("m"), model)
-					require.Equal(t, tokenUsageFrom(7, -1, -1, -1, 9, -1), usage)
-					if traced {
-						require.NotNil(t, recorder.recordedResponse)
-					}
-				})
+		for _, capture := range []bool{true, false} {
+			for _, traced := range []bool{true, false} {
+				for _, tc := range []struct {
+					name, body                   string
+					alwaysInvalid, invalidVector bool
+				}{
+					{"numeric", `{"data":[{"embedding":[1,2]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, false},
+					{"base64", `{"data":[{"embedding":"AACAPwAAAEA="}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, false},
+					{"invalid_vector", `{"data":[{"embedding":[1,"invalid",3]}],"model":"m","usage":{"prompt_tokens":7,"total_tokens":9}}`, false, true},
+					{"invalid_json", `{"data":[{"embedding":[1,]}]}`, true, false},
+					{"invalid_metadata", `{"data":[],"model":123}`, true, false},
+				} {
+					t.Run(fmt.Sprintf("validate=%t/capture=%t/traced=%t/%s", validate, capture, traced, tc.name), func(t *testing.T) {
+						translator := NewEmbeddingOpenAIToOpenAITranslator("v1", "", validate, capture)
+						var span tracingapi.EmbeddingsSpan
+						recorder := &mockEmbeddingsSpan{}
+						if traced {
+							span = recorder
+						}
+						headers, mutation, usage, model, err := translator.ResponseBody(nil, strings.NewReader(tc.body), true, span)
+						if tc.alwaysInvalid || (validate && tc.invalidVector) {
+							require.Error(t, err)
+							require.Nil(t, recorder.recordedResponse)
+							return
+						}
+						require.NoError(t, err)
+						require.Nil(t, headers)
+						require.Nil(t, mutation)
+						require.Equal(t, internalapi.ResponseModel("m"), model)
+						require.Equal(t, tokenUsageFrom(7, -1, -1, -1, 9, -1), usage)
+						if traced {
+							require.NotNil(t, recorder.recordedResponse)
+							if !validate && !capture {
+								require.Empty(t, recorder.recordedResponse.Data)
+							} else {
+								require.Len(t, recorder.recordedResponse.Data, 1)
+								if !tc.invalidVector {
+									require.NotNil(t, recorder.recordedResponse.Data[0].Embedding.Value)
+								}
+							}
+						}
+					})
+				}
 			}
 		}
 	}

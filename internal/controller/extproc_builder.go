@@ -61,6 +61,7 @@ func newExtProcBuilder(options *Options, extProcAsSideCar bool, logger logr.Logg
 		logFormat:                              options.ExtProcLogFormat,
 		enableRedaction:                        options.ExtProcEnableRedaction,
 		validateEmbeddingVectors:               options.ExtProcValidateEmbeddingVectors,
+		traceEmbeddingVectors:                  options.ExtProcTraceEmbeddingVectors,
 		udsPath:                                options.UDSPath,
 		requestHeaderAttributes:                options.RequestHeaderAttributes,
 		spanRequestHeaderAttributes:            options.TracingRequestHeaderAttributes,
@@ -89,7 +90,9 @@ type extProcBuilder struct {
 	enableRedaction bool
 	// validateEmbeddingVectors is the extproc's -validateEmbeddingVectors setting, which defaults to true.
 	validateEmbeddingVectors bool
-	udsPath                  string
+	// traceEmbeddingVectors is the extproc's -traceEmbeddingVectors setting, which defaults to true.
+	traceEmbeddingVectors bool
+	udsPath               string
 
 	requestHeaderAttributes        *string
 	spanRequestHeaderAttributes    *string
@@ -234,7 +237,9 @@ type extProcConfigDigest struct {
 	EnableRedaction bool
 	// SkipEmbeddingVectorValidation is omitted when validation is on, the default, so existing
 	// deployments keep the same hash and are not rolled on upgrade.
-	SkipEmbeddingVectorValidation  bool `json:",omitempty"`
+	SkipEmbeddingVectorValidation bool `json:",omitempty"`
+	// SkipEmbeddingTraceVectors is omitted when trace vectors are on, the default, for the same reason.
+	SkipEmbeddingTraceVectors      bool `json:",omitempty"`
 	UDSPath                        string
 	RequestHeaderAttributes        *string
 	SpanRequestHeaderAttributes    *string
@@ -259,6 +264,7 @@ func (b *extProcBuilder) extProcContainerHash(input extProcContainerInput) strin
 		LogFormat:                      b.nonDefaultLogFormat(),
 		EnableRedaction:                b.enableRedaction,
 		SkipEmbeddingVectorValidation:  !b.validateEmbeddingVectors,
+		SkipEmbeddingTraceVectors:      !b.traceEmbeddingVectors,
 		UDSPath:                        b.udsPath,
 		RequestHeaderAttributes:        b.requestHeaderAttributes,
 		SpanRequestHeaderAttributes:    b.spanRequestHeaderAttributes,
@@ -336,9 +342,12 @@ func (b *extProcBuilder) buildExtProcBaseArgs(needMCP bool) []string {
 	if b.endpointPrefixes != "" {
 		args = append(args, "-endpointPrefixes", b.endpointPrefixes)
 	}
-	// Only the non-default is passed, so the args of deployments that keep validation on are unchanged.
+	// Only non-defaults are passed, so the args of deployments that keep the defaults are unchanged.
 	if !b.validateEmbeddingVectors {
 		args = append(args, "-validateEmbeddingVectors=false")
+	}
+	if !b.traceEmbeddingVectors {
+		args = append(args, "-traceEmbeddingVectors=false")
 	}
 	if b.enableRedaction {
 		args = append(args, "-enableRedaction")

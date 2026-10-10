@@ -68,6 +68,7 @@ spec:
             - --extProcLogLevel={{ .Values.extProc.logLevel }}
             - --extProcLogFormat={{ .Values.extProc.logFormat }}
             - --extProcValidateEmbeddingVectors={{ .Values.extProc.validateEmbeddingVectors }}
+            - --extProcTraceEmbeddingVectors={{ .Values.extProc.traceEmbeddingVectors }}
             - --envoyGatewayNamespace={{ .Values.envoyGateway.namespace }}
             {{- if .Values.extProc.enableRedaction }}
             - --extProcEnableRedaction=true

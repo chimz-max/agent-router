@@ -59,6 +59,11 @@ extProc:
   # validated; trace vectors are best-effort. Tracing valid vectors still costs memory.
   # Maps to controller --extProcValidateEmbeddingVectors and sidecar -validateEmbeddingVectors.
   validateEmbeddingVectors: true
+  # -- Capture valid embedding vectors in traces when validateEmbeddingVectors is false.
+  # Set false to record only model and token usage and avoid vector decoding for tracing.
+  # This option has no effect when validation is true; full decoding and existing tracing remain.
+  # Maps to controller --extProcTraceEmbeddingVectors and sidecar -traceEmbeddingVectors.
+  traceEmbeddingVectors: true
 
   ## @param extProc.extraEnvVars Array with extra environment variables to add to extProc containers
   ## e.g:
