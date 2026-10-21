@@ -16,6 +16,8 @@ permissions:
 jobs:
   analyze:
     name: Analyze
+    # Upstream-only: the Nscale fork uses CodeQL default setup, which rejects uploads from this advanced workflow.
+    if: github.repository == 'theagentrouter/agent-router'
     runs-on: "ubuntu-22.04"
     timeout-minutes: 360
     permissions:

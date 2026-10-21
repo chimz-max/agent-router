@@ -17,7 +17,8 @@ jobs:
     env:
       # Do not use ${{ github.event.pull_request.body }} directly in run command.
       BODY: ${{ github.event.pull_request.body }}
-    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    # Upstream-only: upstream's PR description and title conventions are not enforced on the Nscale fork.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.repository == 'theagentrouter/agent-router' }}
     steps:
       - name: Check comment out lines
         run: |
@@ -55,7 +56,8 @@ jobs:
   title:
     name: Title
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
+    # Upstream-only: upstream's PR description and title conventions are not enforced on the Nscale fork.
+    if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' && github.repository == 'theagentrouter/agent-router' }}
     steps:
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
