@@ -52,11 +52,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
 
       # The Makefile runs Helm as `go tool -modfile=tools/go.mod helm`, so log in with the same binary, which
-      # writes the credentials where its push reads them.
+      # writes the credentials where its push reads them. The chart robot is this repository's own, with Pull
+      # and Push on the helm-charts project: the org's HARBOR_GHCR_ROBOT_* secrets are not shared with public
+      # repositories, and the image robot has no access to helm-charts.
       - name: Log in to Harbor for charts
         env:
-          HELM_OCI_USERNAME: ${{ secrets.HARBOR_GHCR_ROBOT_USERNAME }}
-          HELM_OCI_PASSWORD: ${{ secrets.HARBOR_GHCR_ROBOT_SECRET }}
+          HELM_OCI_USERNAME: ${{ secrets.HARBOR_CHART_ROBOT_USERNAME }}
+          HELM_OCI_PASSWORD: ${{ secrets.HARBOR_CHART_ROBOT_SECRET }}
         run: echo "$HELM_OCI_PASSWORD" | go tool -modfile=tools/go.mod helm registry login registry.nscale.com --username "$HELM_OCI_USERNAME" --password-stdin
 
       - name: Point the chart at the fork's images
