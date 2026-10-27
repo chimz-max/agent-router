@@ -79,16 +79,30 @@ jobs:
           make build.aigw GOOS_LIST="darwin" GOARCH_LIST="arm64"
 
       # The release attaches to the pushed nscale/ tag; --verify-tag stops gh creating a bare v* tag on main.
-      # An existing release is left alone, so a re-run changes nothing.
+      # gh creates the release before uploading its assets, so a failed upload leaves a release missing some.
+      # A re-run uploads only the assets not already uploaded, never replacing one, and stops on any lookup
+      # error other than not found.
       - name: Create a draft release
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists; skipping"
+          set -euo pipefail
+          assets=("./out/ai-gateway-crds-helm-${TAG}.tgz" "./out/ai-gateway-helm-${TAG}.tgz" ./out/aigw-*)
+          if uploaded="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[] | select(.state == "uploaded") | .name' 2>&1)"; then
+            missing=()
+            for asset in "${assets[@]}"; do
+              grep -qxF "$(basename "$asset")" <<<"$uploaded" || missing+=("$asset")
+            done
+            if ((${#missing[@]} == 0)); then
+              echo "Release $GITHUB_REF_NAME already has every asset; skipping"
+              exit 0
+            fi
+            # --clobber only replaces an asset whose earlier upload did not complete.
+            gh release upload "$GITHUB_REF_NAME" --clobber "${missing[@]}"
             exit 0
           fi
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$TAG" --notes "To be written by the release manager" \
-            "./out/ai-gateway-crds-helm-${TAG}.tgz" \
-            "./out/ai-gateway-helm-${TAG}.tgz" \
-            ./out/aigw-*
+          if [[ "$uploaded" != "release not found" ]]; then
+            echo "::error::cannot tell whether release $GITHUB_REF_NAME exists: $uploaded"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$TAG" --notes "To be written by the release manager" "${assets[@]}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
