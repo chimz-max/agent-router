@@ -2,50 +2,74 @@ name: Release
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+**" # Ex. v0.2.0 v0.2.1-rc2
+      # Namespaced so the upstream v* tags the fork carries never publish unpatched code to Harbor.
+      - "nscale/v*" # Ex. nscale/v1.2.0-nscale.1
 
 jobs:
-  docker_push:
-    name: Push Docker Images
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag="${REF_NAME#nscale/}"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nscale\.[0-9]+$ ]] || {
+            echo "::error::tag $REF_NAME is not nscale/v<major>.<minor>.<patch>-nscale.<n>"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  docker_push:
+    name: Push Docker Images
+    needs: [version]
+    permissions:
+      contents: read
     uses: ./.github/workflows/docker_build_job.yaml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
     secrets: inherit
 
   release:
-    needs: [docker_push]
+    needs: [version, docker_push]
     name: Release
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release create requires contents:write
-      packages: write # helm push to GHCR requires packages:write
     env:
-      OCI_REGISTRY: ghcr.io/nscaledev
+      # Images and charts live in different Harbor projects.
+      IMAGE_REGISTRY: registry.nscale.com/envir
+      CHART_REGISTRY: registry.nscale.com/helm-charts
+      TAG: ${{ needs.version.outputs.tag }}
+      # One chart version per release, v-prefixed, as the base layer pins.
+      HELM_CHART_VERSION: ${{ needs.version.outputs.tag }}
     steps:
-      - name: Set HELM_CHART_VERSION and TAG envs
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          echo "HELM_CHART_VERSION=${TAG}" >> $GITHUB_ENV
-          echo "HELM_CHART_VERSION_WITHOUT_V=$(echo ${TAG#v})" >> $GITHUB_ENV
-          echo "TAG=${TAG}" >> $GITHUB_ENV
-
       # To include the helm chart in the release artifact, we build and push it here instead of the separate job.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v4
-      - name: Login into GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Makefile runs Helm as `go tool -modfile=tools/go.mod helm`, so log in with the same binary, which
+      # writes the credentials where its push reads them.
+      - name: Log in to Harbor for charts
+        env:
+          HELM_OCI_USERNAME: ${{ secrets.HARBOR_GHCR_ROBOT_USERNAME }}
+          HELM_OCI_PASSWORD: ${{ secrets.HARBOR_GHCR_ROBOT_SECRET }}
+        run: echo "$HELM_OCI_PASSWORD" | go tool -modfile=tools/go.mod helm registry login registry.nscale.com --username "$HELM_OCI_USERNAME" --password-stdin
 
       - name: Point the chart at the fork's images
-        run: hack/nscale/set-chart-images.sh "${OCI_REGISTRY}/ai-gateway"
+        run: hack/nscale/set-chart-images.sh "${IMAGE_REGISTRY}/ai-gateway"
 
-      - name: Push Helm chart
+      - name: Package Helm charts
+        run: make helm-package
+
+      - name: Push Helm charts
         run: |
-          make helm-push HELM_CHART_VERSION=${HELM_CHART_VERSION}
-          make helm-push HELM_CHART_VERSION=${HELM_CHART_VERSION_WITHOUT_V}
+          hack/nscale/push-charts.sh "oci://${CHART_REGISTRY}" "${HELM_CHART_VERSION}" \
+            "./out/ai-gateway-crds-helm-${HELM_CHART_VERSION}.tgz" \
+            "./out/ai-gateway-helm-${HELM_CHART_VERSION}.tgz"
 
       - name: Build CLI release binaries
         run: |
@@ -54,22 +78,17 @@ jobs:
           # which in turn is used by EG's standalone mode used by aigw, so we skip it
           make build.aigw GOOS_LIST="darwin" GOARCH_LIST="arm64"
 
-      - name: Create a release candidate
-        if: ${{ contains(github.ref, '-rc') }}
+      # The release attaches to the pushed nscale/ tag; --verify-tag stops gh creating a bare v* tag on main.
+      # An existing release is left alone, so a re-run changes nothing.
+      - name: Create a draft release
         run: |
-          gh release create $TAG --prerelease --title $TAG --notes "Release candidate" \
-            ./out/ai-gateway-crds-helm-${TAG}.tgz \
-            ./out/ai-gateway-helm-${TAG}.tgz \
-            ./out/aigw-*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create a stable release
-        if: ${{ !contains(github.ref, '-rc') }}
-        run: |
-          gh release create $TAG --draft --title $TAG --notes "To be written by the release manager" \
-            ./out/ai-gateway-crds-helm-${TAG}.tgz \
-            ./out/ai-gateway-helm-${TAG}.tgz \
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; skipping"
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "$TAG" --notes "To be written by the release manager" \
+            "./out/ai-gateway-crds-helm-${TAG}.tgz" \
+            "./out/ai-gateway-helm-${TAG}.tgz" \
             ./out/aigw-*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

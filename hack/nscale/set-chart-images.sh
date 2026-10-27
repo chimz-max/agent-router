@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Point the ai-gateway-helm chart's default images at the Nscale fork's registry before packaging.
 # Usage: hack/nscale/set-chart-images.sh <image repository prefix>
-#   e.g. hack/nscale/set-chart-images.sh ghcr.io/nscaledev/ai-gateway
+#   e.g. hack/nscale/set-chart-images.sh registry.nscale.com/envir/ai-gateway
 #
 # Upstream's values.yaml defaults the controller and extproc images to docker.io/envoyproxy/ai-gateway-*,
 # the unpatched upstream builds. release.yaml runs this on its checkout so the published chart pulls

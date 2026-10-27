@@ -4,8 +4,8 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: Additional tag to push, e.g. a GitVersion-computed -dev version. Skipped if empty.
-        required: false
+        description: Image tag to push, e.g. v1.2.0-nscale.1. release.yaml validates it.
+        required: true
         type: string
 
 jobs:
@@ -14,11 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     env:
-      # The Nscale fork publishes to the repository's GHCR namespace instead of docker.io/envoyproxy.
-      OCI_REGISTRY: ghcr.io/nscaledev
-      # The source label links each package to this repository; the revision label records the commit it was built from.
+      # The Nscale fork publishes to the envir project on Harbor instead of docker.io/envoyproxy.
+      OCI_REGISTRY: registry.nscale.com/envir
+      # The source label links each image to this repository; the revision label records the commit it was built
+      # from, which the "Check for a published image" step compares against.
       DOCKER_PUSH_ARGS: >-
         --push
         --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -57,34 +57,37 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Login into GHCR
+      - name: Login into Harbor
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: registry.nscale.com
+          username: ${{ secrets.RELEASE_IMAGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.RELEASE_IMAGE_REGISTRY_PASSWORD }}
 
-      # Push images for the push events, e.g. when a new tag is pushed as well as PR merges.
-      # * Only use the tag if the event is a tag event, otherwise use the hash.
-      # * Build for both amd64 and arm64 platforms.
+      # Harbor overwrites a tag on push, so nothing already published is pushed again. A tag already published
+      # from this commit is skipped, so a re-run finishes a partial publish; one published from another commit,
+      # or a registry error, stops the run.
+      - name: Check for a published image
+        id: published
+        env:
+          IMAGE: ${{ env.OCI_REGISTRY }}/ai-gateway-${{ matrix.command_name }}:${{ inputs.tag }}
+        run: |
+          set -uo pipefail
+          if out="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' 2>&1)"; then
+            # .Image is a map of platform to image config for a multi-platform index, one config otherwise.
+            revision="$(jq -r '(if has("config") then [.] else [.[]] end) | [.[].config.Labels["org.opencontainers.image.revision"] // empty] | unique | join(",")' <<<"$out")"
+            if [[ "$revision" == "$GITHUB_SHA" ]]; then
+              echo "$IMAGE is already published from $GITHUB_SHA; skipping"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "::error::$IMAGE is already published from ${revision:-an unknown commit}"; exit 1
+          fi
+          if grep -qiE 'not found|manifest unknown|name unknown' <<<"$out"; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "::error::cannot tell whether $IMAGE is published: $out"; exit 1
+
+      # Build for both amd64 and arm64 platforms.
       - name: Build and Push Image
+        if: steps.published.outputs.skip != 'true'
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="${{ github.sha }}"
-          fi
-          make docker-build.${{ matrix.command_name }} CMD_PATH_PREFIX=${{ matrix.cmd_path_prefix }} ENABLE_MULTI_PLATFORMS=true TAG=$TAG DOCKER_BUILD_ARGS="${DOCKER_PUSH_ARGS}"
-
-      - name: Build and Push Image Latest
-        run: |
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
-            make docker-build.${{ matrix.command_name }} CMD_PATH_PREFIX=${{ matrix.cmd_path_prefix }} ENABLE_MULTI_PLATFORMS=true TAG="latest" DOCKER_BUILD_ARGS="${DOCKER_PUSH_ARGS}"
-          fi
-
-      # inputs.tag is the GitVersion-computed -dev version, additional to the SHA tag above
-      # which remains the documented way to pin to a specific commit.
-      - name: Build and Push Image Dev Version
-        if: ${{ inputs.tag != '' }}
-        run: |
-          make docker-build.${{ matrix.command_name }} CMD_PATH_PREFIX=${{ matrix.cmd_path_prefix }} ENABLE_MULTI_PLATFORMS=true TAG=${{ inputs.tag }} DOCKER_BUILD_ARGS="${DOCKER_PUSH_ARGS}"
+          make docker-build.${{ matrix.command_name }} CMD_PATH_PREFIX=${{ matrix.cmd_path_prefix }} ENABLE_MULTI_PLATFORMS=true TAG="$TAG" DOCKER_BUILD_ARGS="${DOCKER_PUSH_ARGS}"
