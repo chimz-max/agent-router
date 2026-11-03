@@ -3,7 +3,7 @@ on:
   push:
     tags:
       # Namespaced so the upstream v* tags the fork carries never publish unpatched code to Harbor.
-      - "nscale/v*" # Ex. nscale/v1.2.0-nscale.1
+      - "nscale/v*" # Ex. nscale/v1.2.0-nscale.1, or nscale/v1.2.1-rc2-nscale.1 for an upstream release candidate
 
 jobs:
   version:
@@ -20,8 +20,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${REF_NAME#nscale/}"
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-nscale\.[0-9]+$ ]] || {
-            echo "::error::tag $REF_NAME is not nscale/v<major>.<minor>.<patch>-nscale.<n>"; exit 1; }
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?-nscale\.[0-9]+$ ]] || {
+            echo "::error::tag $REF_NAME is not nscale/v<major>.<minor>.<patch>[-rc<m>]-nscale.<n>"; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   docker_push:
