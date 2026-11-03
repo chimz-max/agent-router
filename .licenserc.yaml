@@ -35,6 +35,7 @@ header:
     - .prettierignore
     - .testcoverage.yml
     - LICENSE
+    - README.nscale
     - CODEOWNERS
     - pre-commit.sh
     - "**/*/server.key"

@@ -153,6 +153,7 @@ The forward proxy applies to all AI Gateway upstream (LLM) clusters for Gateways
 :::warning
 Proxy authentication (for example, `Proxy-Authorization`) and a TLS connection to the proxy itself are not currently supported. The proxy is expected to be reachable over plaintext HTTP and to authorize the gateway by network policy (for example, an IP allowlist).
 :::
+
 ## Embedding Response Validation and Trace Vectors
 
 The AI Gateway Helm chart exposes two controller-wide options for OpenAI and Azure OpenAI embedding responses. These are chart values under `extProc`, not fields in the `GatewayConfig` CRD. Providers that require response-format translation retain their existing decoding.
