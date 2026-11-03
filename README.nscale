@@ -1,0 +1,152 @@
+Nscale release v1.2.1-rc2-nscale.1
+===================================
+
+This branch, `release/v1.2.1-nscale`, is the Nscale build of Agent Router (Envoy AI Gateway) v1.2.1-rc2. It is
+upstream's v1.2 patch series plus fixes the fork needs that upstream has not released on v1.2 yet.
+
+Release tag: `nscale/v1.2.1-rc2-nscale.1`. Pushing the tag runs `.github/workflows/release.yaml`, which publishes:
+
+| Artifact          | Location                                                           |
+|-------------------|--------------------------------------------------------------------|
+| Controller image  | `registry.nscale.com/envir/ai-gateway-controller:v1.2.1-rc2-nscale.1` |
+| Extproc image     | `registry.nscale.com/envir/ai-gateway-extproc:v1.2.1-rc2-nscale.1`    |
+| Helm chart        | `oci://registry.nscale.com/helm-charts/ai-gateway-helm`, version `v1.2.1-rc2-nscale.1` |
+| CRDs Helm chart   | `oci://registry.nscale.com/helm-charts/ai-gateway-crds-helm`, version `v1.2.1-rc2-nscale.1` |
+| GitHub release    | Draft release on the tag, with the charts and `aigw` binaries attached |
+
+Images carry the `org.opencontainers.image.revision` label with the commit they were built from. The chart is
+rewritten to point at the Harbor images before it is packaged.
+
+
+How the branch is built
+-----------------------
+
+The branch is four layers. Commit SHAs are on this branch; "from" gives the commit it was cherry-picked from
+(`git cherry-pick -x` records it in each commit message).
+
+```
+upstream release/v1.2 (v1.2.1-rc2, 45ccd9fe)
+  + fork CI                      4 commits, from the fork's main
+  + upstream main-only fixes     8 commits, from upstream main
+  + embedding passthrough fixes  9 commits, the fork's own
+  + release tag format           1 commit
+```
+
+
+1. Base: upstream v1.2.1-rc2
+----------------------------
+
+Upstream `release/v1.2` at `45ccd9fe` ("envoy 1.39.6"), tagged `v1.2.1-rc2`. Over v1.2.0 it adds:
+
+- The MCP proxy listens on `127.0.0.1` only. It used to bind every interface, so any pod that could reach port
+  9856 could set the headers Envoy sets after enforcing the MCPRoute security policy, and skip that policy.
+- Malformed 2xx upstream responses (Anthropic without `usage`, null Gemini, image generation or Bedrock Converse
+  bodies) no longer panic the external processor.
+- MCP session IDs work only on the MCPRoute that created them.
+- `promptSelector` is enforced on `prompts/get` and `completion/complete`.
+- The controller reads at most 1 MiB of an MCPRoute's OAuth authorization server metadata.
+- MCP session encryption seeds are delivered in the filter config Secret instead of as command-line arguments,
+  so they no longer appear in Pod specs.
+- Debug logs redact `api-key` and `x-amz-security-token`, and header mutations in immediate responses.
+- Controller replicas retry on conflict when patching the admission webhook's `caBundle`.
+- Go 1.27.3 and Envoy Proxy 1.39.6.
+
+Upstream's own notes are in `release-notes/v1.2.1.md`. Upgrading from v1.2.0 rolls Gateway pods that serve
+MCPRoutes once, and an MCP session ID reused on a different MCPRoute now returns 400.
+
+
+2. Fork CI
+----------
+
+These make CI publish to Harbor from `nscale/v*` tags and turn off the jobs that only work in the upstream
+repository. The workflow files match the fork's `main`, except for the tag format change in layer 4.
+
+| Commit     | From       | Change |
+|------------|------------|--------|
+| `e1201e6d` | `0378a7a6` | Gate upstream-only workflows (Codecov, image and chart pushes on branch pushes) |
+| `fbab7528` | `b0777d9e` | Publish images and charts to Harbor instead of GHCR |
+| `ae4178db` | `38e53aea` | Finish partial GitHub releases on re-run. The upstream-sync workflow from this commit is left out |
+| `bd92cbdb` | `4a46575f` | Log in to Harbor for charts with the repository's chart robot |
+
+
+3. Upstream main-only fixes
+---------------------------
+
+Bug fixes merged to upstream `main` after v1.2.0 that upstream has not backported to `release/v1.2`.
+
+| Commit     | From       | Change |
+|------------|------------|--------|
+| `d086ad4a` | `f2a14b7c` | Add Claude Sonnet 5.5 to the structured output and effort model list |
+| `5ee7bfe5` | `31ee356f` | Add one InferencePool ext proc filter per pool, not per route match |
+| `547b6fc3` | `35307e5e` | Keep Anthropic streaming overload errors in-band |
+| `e1435c1e` | `ffdb12ea` | Apply QuotaPolicy changes to the Envoy config without a restart |
+| `0b5a5e48` | `81c3ccc4` | Stop charging a quota hit at request time |
+| `1ccbb632` | `1c98cc80` | Add Claude Haiku 5.5 to the structured output and effort model list |
+| `19e0c102` | `f89fa2b3` | Keep the query string on Anthropic passthrough |
+| `4e2a8f8f` | `76f60022` | Forward ping events on the AWS Anthropic messages path |
+
+
+4. Embedding passthrough fixes
+------------------------------
+
+The fork's fixes for memory use on OpenAI and Azure OpenAI embedding passthrough, proposed upstream from the
+`fix/embedding-passthrough-memory-upstream` branch. The "From" column is that branch.
+
+| Commit     | From       | Change |
+|------------|------------|--------|
+| `91b5d861` | `9be4dd4c` | Escape user-facing error JSON |
+| `0e1ae3b1` | `f81a7760` | Avoid decoding vectors in embeddings passthrough |
+| `ef0cd586` | `8b0619fa` | Keep case-sensitive embedding metadata decoding |
+| `3ad169d4` | `c7f4947e` | Make embedding trace capture best effort |
+| `8a92427d` | `9a14104c` | Make embedding vector validation configurable |
+| `ad778cb4` | `a90b9f3e` | Make passthrough embedding trace vectors optional |
+| `3b701726` | `19cd7a1d` | Document embedding validation and trace memory costs |
+| `b5c76d26` | `5a1b7ac8` | Drop the generated chart README |
+| `c84045b4` | `91a49be9` | Use the chart's comment style for the embedding values |
+
+Both new settings default to `true`, which keeps upstream behaviour. To cut embedding memory use, turn them off
+in the chart values:
+
+```yaml
+extProc:
+  # Validate vectors in embedding responses. With false, only JSON syntax and model/usage are validated.
+  # A 100 MiB response benchmark allocated about 2.66 GiB with validation, versus 256 MiB without it.
+  validateEmbeddingVectors: false
+  # Capture vectors in traces. Only applies when validateEmbeddingVectors is false.
+  traceEmbeddingVectors: false
+```
+
+| Chart value                        | Controller flag                      | Extproc flag                |
+|------------------------------------|--------------------------------------|-----------------------------|
+| `extProc.validateEmbeddingVectors` | `--extProcValidateEmbeddingVectors`  | `-validateEmbeddingVectors` |
+| `extProc.traceEmbeddingVectors`    | `--extProcTraceEmbeddingVectors`     | `-traceEmbeddingVectors`    |
+
+The controller passes the extproc flags only when they are `false`, so deployments that keep the defaults are not
+rolled on upgrade. The full description is in `site/docs/capabilities/gateway-config.md` and
+`site/docs/capabilities/observability/tracing.md`.
+
+
+5. Release tag format
+---------------------
+
+`2d0eb196` lets `release.yaml` accept a tag built on an upstream release candidate. Tags must match
+`nscale/v<major>.<minor>.<patch>[-rc<m>]-nscale.<n>`, for example `nscale/v1.2.0-nscale.1` or
+`nscale/v1.2.1-rc2-nscale.1`.
+
+
+Not included
+------------
+
+Upstream `main` also has features after v1.2.0 that this branch leaves out: dynamic, weekly, monthly and yearly
+quota windows, cross-namespace quota backends, the OpenAI decision API, OpenAI workload identity federation, and
+the removal of the unused `GCPWorkloadIdentityProvider` API type. It also leaves out docs, site and test-only
+changes.
+
+
+Cutting the next release
+------------------------
+
+When upstream tags the final v1.2.1, or later v1.2 patches, rebuild the branch on the new upstream `release/v1.2`
+and reapply layers 2 to 5. Drop any layer 3 commit that upstream has backported, and any layer 4 commit that
+upstream has merged. Then increment the `-nscale.<n>` number, or reset it to 1 for a new upstream version, and
+update this file.
