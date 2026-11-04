@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: Image tag to push, e.g. v1.2.0-nscale.1. release.yaml validates it.
+        description: Image tag to push, e.g. v1.2.0-nscale.1 or v1.2.1-rc2-nscale.1. release.yaml validates it.
         required: true
         type: string
 
