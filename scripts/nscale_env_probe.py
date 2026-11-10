@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only environment probe for the Alfred review sandbox (authorized security test).
+"""Read-only environment probe for the review sandbox.
 
 Prints token presence/length/sha256 prefixes only — never token values.
 Makes read-only GitHub API calls to report the token identity and the
